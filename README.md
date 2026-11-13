@@ -13,6 +13,9 @@ EDITBOT is a Pyrogram + MongoDB group moderation bot with anti-promotion scannin
 - Anti-flood protection with a configurable threshold.
 - Record edited-message history (old text and new text).
 - Optional edit deletion via /editguard; it is OFF by default.
+- Notify the group when an edited message is removed.
+- Owner-managed persistent Sudo users with /addsudo, /delsudo, and /sudolist.
+- Telegram ID lookup, /start, /help, /status, and owner-only global statistics.
 - Per-group settings, moderation logs, and basic statistics.
 - Optional central moderation log chat via LOG_CHAT_ID.
 - MongoDB indexes for group settings, approvals, snapshots, and moderation history.
@@ -56,8 +59,16 @@ For automatic muting, add the bot as a group administrator and grant permission 
 | `/editguard on/off/status` | Toggle deletion of edited messages |
 | `/editlogs` | Show recent edit history |
 | `/stats` | Show group moderation statistics |
+| `/id [@user]` | Show user, chat, message, and replied-message IDs |
+| `/start` | Start EDITBOT and show its introduction |
+| `/help` | Show available commands |
+| `/status` | Show bot uptime and status |
+| `/addsudo @user` | Owner-only: grant Sudo privileges |
+| `/delsudo @user` | Owner-only: revoke Sudo privileges |
+| `/sudolist` | Owner-only: list owners and Sudo users |
+| `/botstats` | Owner-only: global bot statistics |
 
-Commands that target a user also accept a reply to that user's message. All moderation commands are admin-only (OWNER_IDS is also recognized).
+Commands that target a user also accept a reply to that user's message. Group moderation commands are admin-only (OWNER_IDS is also recognized). Sudo management and global statistics are owner-only. Sudo users are exempt from edited-message deletion.
 
 ## Environment variables
 
@@ -68,4 +79,6 @@ See .env.example. Keep `.env` private and never commit bot tokens, API credentia
 - Anti-promo is OFF until an admin enables it.
 - Anti-flood is OFF until an admin enables it.
 - Edited-message deletion is OFF; edit history is still recorded.
+- Only configured owners can add or remove Sudo users.
+- Sudo users and group admins are exempt from edit deletion.
 - Bio/channel scanning respects Telegram's access controls.
