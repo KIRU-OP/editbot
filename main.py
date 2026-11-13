@@ -456,7 +456,7 @@ async def antipromo_command(client, message):
 
 
 
-@app.on_callback_query(filters.regex(r"^approve_promo:(\\d+)$"))
+@app.on_callback_query(filters.regex(r"^approve_promo:(\d+)$"))
 async def approve_promo_callback(client, callback_query):
     if not callback_query.message or not callback_query.message.chat:
         return await callback_query.answer("This approval button is unavailable.", show_alert=True)
