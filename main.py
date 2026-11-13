@@ -168,6 +168,64 @@ async def notify_log(client, chat_id, user, reason, label, action="AUTO-MUTE"):
         pass
 
 
+async def send_activity_log(client, text):
+    """Send operational activity to the configured private log group."""
+    if not LOG_CHAT_ID:
+        return
+    try:
+        await client.send_message(LOG_CHAT_ID, text, disable_web_page_preview=True)
+    except Exception as exc:
+        print(f"Activity log delivery failed: {type(exc).__name__}: {exc}")
+
+
+def user_label(user):
+    if not user:
+        return "Unknown"
+    name = " ".join(filter(None, [user.first_name, user.last_name])) or "Unknown"
+    return f"{name} (@{user.username})" if user.username else name
+
+
+@app.on_chat_member_updated()
+async def bot_membership_activity(client, update):
+    chat = update.chat
+    if chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
+        return
+    old_member = update.old_chat_member
+    new_member = update.new_chat_member
+    if not new_member or not new_member.user:
+        return
+    me = await client.get_me()
+    if new_member.user.id != me.id:
+        return
+    old_status = old_member.status if old_member else ChatMemberStatus.LEFT
+    new_status = new_member.status
+    active = (ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER)
+    actor = user_label(update.from_user)
+    actor_id = update.from_user.id if update.from_user else "Unavailable"
+    group_link = f"https://t.me/{chat.username}" if chat.username else (
+        getattr(chat, "invite_link", None) or "Private group: invite link unavailable"
+    )
+    if old_status not in active and new_status in active:
+        event = "🟢 BOT ADDED TO GROUP"
+    elif old_status in active and new_status not in active:
+        event = "🔴 BOT REMOVED FROM GROUP"
+    else:
+        return
+    await send_activity_log(
+        client,
+        "📡 EDITBOT ACTIVITY LOG\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"{event}\n\n"
+        f"Group: {chat.title or 'Unknown group'}\n"
+        f"Group ID: {chat.id}\n"
+        f"Group link: {group_link}\n\n"
+        f"Action by: {actor}\n"
+        f"Actor ID: {actor_id}\n"
+        f"Old status: {old_status}\n"
+        f"New status: {new_status}\n"
+        f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
+    )
+
 async def handle_promo(client, message, settings):
     user = message.from_user
     if not user or user.is_bot:
@@ -564,6 +622,14 @@ async def stats_command(client, message):
 @app.on_message(filters.group & filters.command("start"))
 async def start_command(client, message):
     if message.chat.type == ChatType.PRIVATE:
+        await send_activity_log(
+            client,
+            "🚀 EDITBOT /start ACTIVITY\n"
+            f"Started by: {user_label(message.from_user)}\n"
+            f"User ID: {message.from_user.id if message.from_user else 'Unavailable'}\n"
+            f"Username: @{message.from_user.username if message.from_user and message.from_user.username else 'not set'}\n"
+            f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        )
         await message.reply_text(
             "👋 Welcome to EDITBOT!\n\n"
             "I help group admins manage edited messages, anti-promotion, approvals, "
@@ -750,6 +816,14 @@ async def botstats_command(client, message):
 
 async def startup():
     await connect_db()
+    me = await app.get_me()
+    await send_activity_log(
+        app,
+        "✅ EDITBOT STARTED\n"
+        f"Bot: @{me.username or me.first_name}\n"
+        f"Bot ID: {me.id}\n"
+        f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
+    )
     print("EDITBOT connected to MongoDB and is ready.")
 
 
