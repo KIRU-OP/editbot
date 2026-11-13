@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorClient
-from config import MONGO_URI, DB_NAME
+from config import MONGO_URI, DB_NAME, DEFAULT_MUTE_MINUTES, FLOOD_LIMIT
 
 _client = None
 _db = None
+
 
 async def connect_db():
     global _client, _db
@@ -16,24 +17,33 @@ async def connect_db():
     await _db.approved_users.create_index([("chat_id", 1), ("user_id", 1)], unique=True)
     await _db.approved_links.create_index([("chat_id", 1), ("link", 1)], unique=True)
     await _db.moderation_logs.create_index([("chat_id", 1), ("created_at", -1)])
+    await _db.message_snapshots.create_index([("chat_id", 1), ("message_id", 1)], unique=True)
+    await _db.edit_history.create_index([("chat_id", 1), ("edited_at", -1)])
     return _db
+
 
 def db():
     if _db is None:
         raise RuntimeError("Database is not connected.")
     return _db
 
+
 async def group_settings(chat_id: int):
     defaults = {
         "chat_id": chat_id,
         "antipromo": False,
-        "mute_minutes": 60,
+        "antiflood": False,
+        "mute_minutes": DEFAULT_MUTE_MINUTES,
         "scan_bio": True,
         "scan_message_links": True,
         "scan_public_channel_posts": True,
+        "delete_edited_messages": False,
+        "flood_limit": FLOOD_LIMIT,
+        "flood_mute_minutes": 5,
     }
     await db().groups.update_one({"chat_id": chat_id}, {"$setOnInsert": defaults}, upsert=True)
     return await db().groups.find_one({"chat_id": chat_id})
+
 
 async def log_action(chat_id: int, user_id: int, username: str, reason: str, action: str):
     await db().moderation_logs.insert_one({
