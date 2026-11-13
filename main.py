@@ -312,10 +312,15 @@ async def handle_promo(client, message, settings):
             "🛡️ EDITBOT Anti-Promotion\n"
             f"Member: {label}\n"
             f"Reason: {reason}\n"
-            f"Detected link: {found_link}\n"
-            f"{status}\n"
-            f"Mute duration: {duration if muted else 'Not applied'}"
-            f"{details}",
+            f"Message deleted: {'YES' if deleted else 'NO'}\n"
+            f"Member muted: {'YES' if muted else 'NO'}\n"
+            f"Mute duration: {duration if muted else 'Not applied'}",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    "✅ Approve Member",
+                    callback_data=f"approve_promo:{user.id}",
+                )
+            ]]),
             disable_web_page_preview=True,
         )
     except Exception as exc:
@@ -449,6 +454,36 @@ async def antipromo_command(client, message):
         f"Channel scan: {'ON' if current.get('scan_public_channel_posts', True) else 'OFF'}"
     )
 
+
+
+@app.on_callback_query(filters.regex(r"^approve_promo:(\\d+)$"))
+async def approve_promo_callback(client, callback_query):
+    if not callback_query.message or not callback_query.message.chat:
+        return await callback_query.answer("This approval button is unavailable.", show_alert=True)
+    chat_id = callback_query.message.chat.id
+    admin_id = callback_query.from_user.id
+    if not await is_admin(client, chat_id, admin_id):
+        return await callback_query.answer("Only group admins can approve members.", show_alert=True)
+
+    target_id = int(callback_query.data.split(":", 1)[1])
+    try:
+        target = await client.get_users(target_id)
+    except Exception:
+        target = None
+    await db().approved_users.update_one(
+        {"chat_id": chat_id, "user_id": target_id},
+        {"$set": {
+            "username": target.username if target else None,
+            "approved_at": datetime.now(timezone.utc),
+            "approved_by": admin_id,
+        }},
+        upsert=True,
+    )
+    await callback_query.answer("Member approved for this group.")
+    try:
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
 
 @app.on_message(filters.group & filters.command("approve"))
 async def approve_command(client, message):
