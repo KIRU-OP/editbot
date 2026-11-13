@@ -237,7 +237,7 @@ async def resolve_target(client, message):
     return None
 
 
-@app.on_message(filters.group & ~filters.service & ~filters.edited)
+@app.on_message(filters.group & ~filters.service)
 async def group_message_handler(client, message):
     user = message.from_user
     if not user or user.is_bot:
