@@ -46,6 +46,11 @@ async def is_approved(chat_id, user_id):
     return await db().approved_users.find_one({"chat_id": chat_id, "user_id": user_id}) is not None
 
 
+async def is_link_approved(chat_id, link):
+    normalized = link.rstrip("/").lower()
+    return await db().approved_links.find_one({"chat_id": chat_id, "link": normalized}) is not None
+
+
 async def inspect_profile_and_public_channel(client, user_id):
     """Inspect only profile/channel information Telegram exposes to this bot."""
     now = datetime.now(timezone.utc).timestamp()
@@ -105,7 +110,7 @@ async def notify_log(client, chat_id, user, reason, label):
 
 
 @app.on_message(filters.group & ~filters.service & ~filters.command(
-    ["antipromo", "approve", "unapprove", "approvedusers", "unmute", "promologs", "scan"]
+    ["antipromo", "approve", "unapprove", "approvedusers", "approve_link", "unapprove_link", "approved_links", "unmute", "promologs", "scan"]
 ))
 async def anti_promo_handler(client, message):
     user = message.from_user
@@ -120,7 +125,9 @@ async def anti_promo_handler(client, message):
     reason = None
     direct_links = extract_group_invites(message_text(message))
     if direct_links and settings.get("scan_message_links", True):
-        reason = "group invite link posted in a group message"
+        blocked_links = [link for link in direct_links if not await is_link_approved(message.chat.id, link)]
+        if blocked_links:
+            reason = "unapproved group invite link posted in a group message"
     else:
         findings = await inspect_profile_and_public_channel(client, user.id)
         if findings:
@@ -263,6 +270,44 @@ async def scan_command(client, message):
         "No accessible profile/channel promotion found. Telegram may hide profile or channel "
         "details from bots, so this result cannot guarantee that no promotion exists."
     )
+
+
+@app.on_message(filters.group & filters.command("approve_link"))
+async def approve_link_command(client, message):
+    if not await require_admin(message):
+        return
+    if len(message.command) < 2:
+        return await message.reply_text("Usage: /approve_link https://t.me/+invite")
+    link = message.command[1].rstrip("/").lower()
+    if not extract_group_invites(link):
+        return await message.reply_text("Please provide a Telegram invite link (t.me/+... or t.me/joinchat/...).")
+    await db().approved_links.update_one(
+        {"chat_id": message.chat.id, "link": link},
+        {"$set": {"added_by": message.from_user.id, "added_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    await message.reply_text("✅ This invite link is now approved for this group.")
+
+
+@app.on_message(filters.group & filters.command("unapprove_link"))
+async def unapprove_link_command(client, message):
+    if not await require_admin(message):
+        return
+    if len(message.command) < 2:
+        return await message.reply_text("Usage: /unapprove_link https://t.me/+invite")
+    link = message.command[1].rstrip("/").lower()
+    result = await db().approved_links.delete_one({"chat_id": message.chat.id, "link": link})
+    await message.reply_text("✅ Approved link removed." if result.deleted_count else "That link was not in the approved list.")
+
+
+@app.on_message(filters.group & filters.command("approved_links"))
+async def approved_links_command(client, message):
+    if not await require_admin(message):
+        return
+    rows = await db().approved_links.find({"chat_id": message.chat.id}).limit(50).to_list(length=50)
+    if not rows:
+        return await message.reply_text("No approved invite links in this group.")
+    await message.reply_text("Approved Invite Links\\n" + "\\n".join("• " + row["link"] for row in rows))
 
 
 async def startup():
