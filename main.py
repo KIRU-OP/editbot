@@ -4,7 +4,7 @@ import time
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from pyrogram.enums import ChatMemberStatus, ChatType
 from pyrogram.types import ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -753,5 +753,15 @@ async def startup():
     print("EDITBOT connected to MongoDB and is ready.")
 
 
+async def main():
+    await app.start()
+    try:
+        await startup()
+        print("EDITBOT is running. Press Ctrl+C to stop.")
+        await idle()
+    finally:
+        await app.stop()
+
+
 if __name__ == "__main__":
-    app.run(startup)
+    app.run(main())
