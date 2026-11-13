@@ -37,39 +37,65 @@ For automatic muting, add the bot as a group administrator and grant permission 
 7. Add the bot to your group as an administrator with permission to restrict members.
 8. Enable desired features with the commands below.
 
-## Admin commands
+## Complete command guide
 
-| Command | Purpose |
+Send `/help` to EDITBOT in a private chat or in your group to see the full in-bot guide.
+
+### Group admin commands
+
+| Command | How to use it |
 |---|---|
-| `/antipromo on` | Enable anti-promotion scanning |
-| `/antipromo off` | Disable anti-promotion scanning |
-| `/antipromo status` | Show anti-promo settings |
-| `/approve @user` | Approve a member (or reply to them) |
-| `/unapprove @user` | Remove member approval |
-| `/approved` | List approved members |
-| `/approvedusers` | Backward-compatible alias |
-| `/approve_link <invite>` | Approve one invite link |
-| `/unapprove_link <invite>` | Remove an approved invite link |
-| `/approved_links` | List approved invite links |
-| `/scan @user` | Scan accessible bio/public-channel information |
-| `/unmute @user` | Restore a member's send permissions |
-| `/promologs` | Show recent moderation actions |
-| `/setmute <minutes>` | Set anti-promo mute duration; 0 means manual unmute |
-| `/antiflood on/off/status` | Control flood protection |
-| `/editguard on/off/status` | Toggle deletion of edited messages |
-| `/editlogs` | Show recent edit history |
-| `/stats` | Show group moderation statistics |
-| `/id [@user]` | Show user, chat, message, and replied-message IDs |
-| `/start` | Start EDITBOT and show its introduction |
-| `/help` | Show available commands |
-| `/status` | Show bot uptime and status |
-| `/addsudo @user` | Owner-only: grant Sudo privileges |
-| `/delsudo @user` | Owner-only: revoke Sudo privileges |
-| `/sudolist` | Owner-only: list owners and Sudo users |
-| `/botstats` | Owner-only: global bot statistics |
+| `/antipromo on` | Enable promotion scanning in this group. |
+| `/antipromo off` | Disable promotion scanning. |
+| `/antipromo status` | View anti-promo and scan settings. |
+| `/approve @username` | Exempt a member from anti-promo; alternatively reply to their message with `/approve`. |
+| `/unapprove @username` | Remove a member's exemption; reply form also works. |
+| `/approved` | List approved members. |
+| `/approvedusers` | Alias for `/approved`. |
+| `/unmute @username` | Restore a member's send permissions; reply form also works. |
+| `/approve_link https://t.me/+CODE` | Add a group invite to this group's allowlist. |
+| `/unapprove_link https://t.me/+CODE` | Remove an invite from the allowlist. |
+| `/approved_links` | List allowed invite links. |
+| `/scan @username` | Scan accessible bio/public-channel information; reply form also works. |
+| `/promologs` | Show recent moderation actions. |
+| `/antiflood on` / `off` / `status` | Enable, disable, or check flood protection. |
+| `/editguard on` / `off` / `status` | Enable, disable, or check edited-message deletion. |
+| `/editlogs` | Show recent before/after edit history. |
+| `/setmute 30` | Set anti-promo mutes to 30 minutes. |
+| `/setmute 0` | Keep auto-muted members muted until an admin unmutes them. |
+| `/stats` | Show this group's moderation statistics. |
+| `/id` | Show your Telegram ID, chat ID, and message ID. |
+| `/id @username` | Look up a user's Telegram ID. |
 
-Commands that target a user also accept a reply to that user's message. Group moderation commands are admin-only (OWNER_IDS is also recognized). Sudo management and global statistics are owner-only. Sudo users are exempt from edited-message deletion.
+### Owner-only commands
 
+| Command | How to use it |
+|---|---|
+| `/addsudo @username` | Grant persistent Sudo access; you can also reply to the user's message with `/addsudo`. |
+| `/delsudo @username` | Revoke Sudo access; reply form also works. |
+| `/rmsudo @username` | Alias for `/delsudo`. |
+| `/sudolist` | List configured owners and Sudo users. |
+| `/botstats` | Show global bot statistics. |
+| `/globalstats` | Alias for `/botstats`. |
+| `/stats` in private chat | Show global statistics for the owner. |
+
+### General commands
+
+| Command | How to use it |
+|---|---|
+| `/start` | Show the welcome message and setup hint. |
+| `/help` | Display the complete command guide inside Telegram. |
+| `/status` | Show uptime and runtime information. |
+
+### Quick setup in a group
+
+1. Add EDITBOT to your group and promote it to administrator.
+2. Grant message-deletion permission and restrict-members permission.
+3. Run `/antipromo on` to enable promotion checks.
+4. Optionally run `/antiflood on` and `/editguard on`.
+5. Use `/help` whenever you need command syntax and usage examples.
+
+Commands that target a member accept either an `@username` argument or a reply to that member's message. Group moderation commands require group-admin rights. Sudo management and global statistics are owner-only.
 ## Environment variables
 
 See .env.example. Keep `.env` private and never commit bot tokens, API credentials, or database credentials.
