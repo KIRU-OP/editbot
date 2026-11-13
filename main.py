@@ -236,16 +236,18 @@ async def handle_promo(client, message, settings):
         return
 
     reasons = []
-    text_links = extract_group_invites(message_text(message))
+    body = message_text(message)
+
+    # Check invite links posted directly in the group.
     if settings.get("scan_message_links", True):
-        for link in text_links:
+        for link in extract_group_invites(body):
             if not await is_link_approved(message.chat.id, link):
                 reasons.append(("unapproved group invite posted in a message", link))
                 break
-        # Resolve public Telegram handles in messages: public groups are promo links,
-        # while channels are not treated as group invites merely because they are linked.
+
+        # Public group links are also promotion links; public channels are not.
         if not reasons:
-            for handle in sorted(extract_public_handles(message_text(message)))[:3]:
+            for handle in sorted(extract_public_handles(body))[:3]:
                 try:
                     linked_chat = await client.get_chat(handle)
                     if linked_chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
@@ -256,8 +258,11 @@ async def handle_promo(client, message, settings):
                 except Exception:
                     continue
 
-    # Run profile/channel scan independently, even when the message itself contains a link.
-    if settings.get("scan_bio", True) or settings.get("scan_public_channel_posts", True):
+    # Scan accessible bio/public-channel details when enabled.
+    if not reasons and (
+        settings.get("scan_bio", True)
+        or settings.get("scan_public_channel_posts", True)
+    ):
         findings = await inspect_profile_and_public_channel(client, user.id)
         for reason, link in findings:
             if not await is_link_approved(message.chat.id, link):
@@ -266,22 +271,60 @@ async def handle_promo(client, message, settings):
 
     if not reasons:
         return
-    reason, _link = reasons[0]
+
+    reason, found_link = reasons[0]
+    label = "@" + user.username if user.username else (user.first_name or str(user.id))
+    deleted = False
+    muted = False
+    errors = []
+
+    # Remove the triggering message. This was missing in the previous version.
+    try:
+        await message.delete()
+        deleted = True
+    except Exception as exc:
+        errors.append("message deletion failed: " + type(exc).__name__)
+
+    # Apply the configured mute independently, so a delete failure does not skip it.
     try:
         minutes = int(settings.get("mute_minutes", DEFAULT_MUTE_MINUTES))
         label = await mute_member(client, message.chat.id, user, reason, minutes)
-        duration = "until an admin unmutes" if minutes <= 0 else f"{minutes} minutes"
-        await message.reply_text(
-            "🛡️ EDITBOT Anti-Promotion\n"
-            f"Member: {label}\nReason: {reason}\n"
-            f"Action: Muted for {duration}.",
-        )
-        await notify_log(client, message.chat.id, user, reason, label)
+        muted = True
     except Exception as exc:
+        errors.append("mute failed: " + type(exc).__name__)
         await log_action(
             message.chat.id, user.id, user.username or str(user.id),
             reason, "MUTE_FAILED: " + type(exc).__name__,
         )
+
+    duration = (
+        "until an admin unmutes" if int(settings.get("mute_minutes", DEFAULT_MUTE_MINUTES)) <= 0
+        else f"{int(settings.get('mute_minutes', DEFAULT_MUTE_MINUTES))} minutes"
+    )
+    status = (
+        f"Message deleted: {'YES' if deleted else 'NO'}\n"
+        f"Member muted: {'YES' if muted else 'NO'}"
+    )
+    details = ("\nErrors: " + "; ".join(errors)) if errors else ""
+    try:
+        await client.send_message(
+            message.chat.id,
+            "🛡️ EDITBOT Anti-Promotion\n"
+            f"Member: {label}\n"
+            f"Reason: {reason}\n"
+            f"Detected link: {found_link}\n"
+            f"{status}\n"
+            f"Mute duration: {duration if muted else 'Not applied'}"
+            f"{details}",
+            disable_web_page_preview=True,
+        )
+    except Exception as exc:
+        print(f"Anti-promo notice failed: {type(exc).__name__}: {exc}")
+
+    await notify_log(
+        client, message.chat.id, user, reason, label,
+        action="AUTO-MUTE" if muted else "PROMO-DETECTED",
+    )
 
 
 async def resolve_target(client, message):
