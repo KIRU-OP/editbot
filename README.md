@@ -35,6 +35,9 @@ A Telegram bot cannot forcibly open every member's private profile data or enume
 - /approve @username — exempt a member in this group (or reply to them).
 - /unapprove @username — remove the exemption.
 - /approvedusers — list approved members.
+- /approve_link https://t.me/+invite — allow a specific invite link in this group.
+- /unapprove_link https://t.me/+invite — remove an approved invite link.
+- /approved_links — list approved invite links.
 - /scan @username — inspect accessible profile/channel information (or reply to a member).
 - /unmute @username — unmute a member (or reply to them).
 - /promologs — show recent moderation actions.
