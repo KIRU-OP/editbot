@@ -20,6 +20,16 @@ async def connect_db():
     await _db.message_snapshots.create_index([("chat_id", 1), ("message_id", 1)], unique=True)
     await _db.edit_history.create_index([("chat_id", 1), ("edited_at", -1)])
     await _db.sudo_users.create_index("user_id", unique=True)
+
+    # One-time migration: enable automatic anti-promotion for existing groups.
+    marker = await _db.bot_meta.find_one({"_id": "auto_antipromo_v1"})
+    if not marker:
+        await _db.groups.update_many({}, {"$set": {"antipromo": True}})
+        await _db.bot_meta.update_one(
+            {"_id": "auto_antipromo_v1"},
+            {"$set": {"enabled_at": datetime.now(timezone.utc)}},
+            upsert=True,
+        )
     return _db
 
 
@@ -32,7 +42,7 @@ def db():
 async def group_settings(chat_id: int):
     defaults = {
         "chat_id": chat_id,
-        "antipromo": False,
+        "antipromo": True,
         "antiflood": False,
         "mute_minutes": DEFAULT_MUTE_MINUTES,
         "scan_bio": True,
