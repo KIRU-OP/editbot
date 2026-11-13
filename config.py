@@ -22,5 +22,10 @@ LOG_CHAT_ID = int(os.getenv("LOG_CHAT_ID", "0") or "0")
 FLOOD_LIMIT = max(2, int(os.getenv("FLOOD_LIMIT", "6")))
 FLOOD_WINDOW_SECONDS = max(2, int(os.getenv("FLOOD_WINDOW_SECONDS", "8")))
 
+# Legacy compatibility: OWNER_ID can be supplied alongside OWNER_IDS.
+legacy_owner = os.getenv("OWNER_ID", "").strip()
+if legacy_owner.isdigit():
+    OWNER_IDS.add(int(legacy_owner))
+
 if not API_ID or not API_HASH or not BOT_TOKEN:
     raise RuntimeError("Set API_ID, API_HASH and BOT_TOKEN in your environment.")
