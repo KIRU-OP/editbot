@@ -4,7 +4,7 @@ import time
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 
-from pyrogram import Client, filters, idle
+from pyrogram import Client, filters, idle, raw
 from pyrogram.enums import ChatMemberStatus, ChatType
 from pyrogram.types import ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -97,49 +97,89 @@ async def is_link_approved(chat_id, link):
 
 
 async def inspect_profile_and_public_channel(client, user_id, force=False):
-    """Scan only profile/channel data Telegram exposes to this bot."""
+    """Scan accessible bio plus the user's linked personal channel when Telegram exposes it."""
     now = datetime.now(timezone.utc).timestamp()
-    async with CACHE_LOCK:
-        cached = PROFILE_CACHE.get(user_id)
-        if not force and cached and now - cached[0] < PROFILE_CACHE_SECONDS:
-            return cached[1]
+    if not force:
+        async with CACHE_LOCK:
+            cached = PROFILE_CACHE.get(user_id)
+            if cached and now - cached[0] < PROFILE_CACHE_SECONDS:
+                return cached[1]
 
     findings = []
+    scanned_channels = set()
     handles = set()
     try:
         profile = await client.get_chat(user_id)
         bio = getattr(profile, "bio", None) or ""
-        bio_links = extract_group_invites(bio)
-        if bio_links:
-            findings.append(("member bio contains a Telegram group invite", bio_links[0]))
+        for link in extract_group_invites(bio):
+            findings.append(("member bio contains a Telegram group invite", link))
+
         handles = extract_public_handles(bio)
-        for handle in sorted(handles)[:3]:
+        for handle in sorted(handles)[:5]:
             try:
                 linked_chat = await client.get_chat(handle)
                 if linked_chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
                     findings.append((f"member bio links to public group @{handle}", f"https://t.me/{handle}"))
             except Exception:
                 continue
+            try:
+                linked_chat = await client.get_chat(handle)
+                if linked_chat.type == ChatType.CHANNEL:
+                    scanned_channels.add(linked_chat.id)
+            except Exception:
+                pass
     except Exception:
-        # An inaccessible profile is not evidence of a violation.
+        # Continue with the MTProto full-user lookup below if the basic profile call fails.
         pass
 
-    # A public channel is scanned only when its public handle is visible in accessible bio text.
-    for handle in sorted(handles)[:3]:
+    # Telegram profile's "Channel" card is a linked personal channel, not necessarily written in bio.
+    # Ask Telegram for the full-user object and inspect its personal_channel_id when available.
+    try:
+        user = await client.get_users(user_id)
+        if getattr(user, "access_hash", None):
+            full = await client.invoke(
+                raw.functions.users.GetFullUser(
+                    id=raw.types.InputUser(user_id=user.id, access_hash=user.access_hash)
+                )
+            )
+            personal_channel_id = getattr(full.full_user, "personal_channel_id", None)
+            if personal_channel_id:
+                scanned_channels.add(int(personal_channel_id))
+    except Exception as exc:
+        print(f"Linked personal-channel lookup unavailable for {user_id}: {type(exc).__name__}")
+
+    # Scan only channels that are publicly accessible to this bot.
+    for channel_id in scanned_channels:
         try:
-            channel = await client.get_chat(handle)
+            channel = await client.get_chat(channel_id)
+            channel_name = "@" + channel.username if channel.username else str(channel_id)
             async for post in client.get_chat_history(channel.id, limit=CHANNEL_SCAN_POSTS):
-                links = extract_group_invites(message_text(post))
-                if links:
-                    findings.append((f"public channel @{handle} contains a group invite", links[0]))
+                post_text = message_text(post)
+                for link in extract_group_invites(post_text):
+                    findings.append((f"linked channel {channel_name} contains a group invite", link))
                     break
-        except Exception:
-            continue
+                if any(reason.startswith("linked channel ") for reason, _ in findings):
+                    break
+
+                for handle in sorted(extract_public_handles(post_text))[:5]:
+                    try:
+                        linked_chat = await client.get_chat(handle)
+                        if linked_chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
+                            findings.append((
+                                f"linked channel {channel_name} promotes public group @{handle}",
+                                f"https://t.me/{handle}",
+                            ))
+                            break
+                    except Exception:
+                        continue
+                if any(reason.startswith("linked channel ") for reason, _ in findings):
+                    break
+        except Exception as exc:
+            print(f"Linked channel scan unavailable for {channel_id}: {type(exc).__name__}")
 
     async with CACHE_LOCK:
         PROFILE_CACHE[user_id] = (now, findings)
     return findings
-
 
 async def mute_member(client, chat_id, user, reason, minutes):
     until = None if minutes <= 0 else datetime.now(timezone.utc) + timedelta(minutes=minutes)
@@ -151,6 +191,21 @@ async def mute_member(client, chat_id, user, reason, minutes):
     label = "@" + user.username if user.username else (user.first_name or str(user.id))
     await log_action(chat_id, user.id, label, reason, "AUTO-MUTE")
     return label
+
+
+async def unmute_member(client, chat_id, user_id):
+    """Restore ordinary member send permissions after admin approval."""
+    await client.restrict_chat_member(
+        chat_id,
+        user_id,
+        ChatPermissions(
+            can_send_messages=True,
+            can_send_media_messages=True,
+            can_send_other_messages=True,
+            can_add_web_page_previews=True,
+        ),
+    )
+    await log_action(chat_id, user_id, str(user_id), "unmuted after admin approval", "APPROVAL-UNMUTE")
 
 
 async def notify_log(client, chat_id, user, reason, label, action="AUTO-MUTE"):
@@ -470,6 +525,7 @@ async def approve_promo_callback(client, callback_query):
         target = await client.get_users(target_id)
     except Exception:
         target = None
+
     await db().approved_users.update_one(
         {"chat_id": chat_id, "user_id": target_id},
         {"$set": {
@@ -479,9 +535,15 @@ async def approve_promo_callback(client, callback_query):
         }},
         upsert=True,
     )
-    await callback_query.answer("Member approved for this group.")
+    try:
+        await unmute_member(client, chat_id, target_id)
+        result_text = "✅ Member approved and unmuted."
+    except Exception as exc:
+        result_text = f"✅ Member approved. Unmute failed: {type(exc).__name__}; use /unmute."
+    await callback_query.answer(result_text, show_alert=True)
     try:
         await callback_query.message.edit_reply_markup(reply_markup=None)
+        await callback_query.message.reply_text(result_text)
     except Exception:
         pass
 
@@ -498,7 +560,13 @@ async def approve_command(client, message):
                   "approved_by": message.from_user.id}},
         upsert=True,
     )
-    await message.reply_text(f"✅ Approved {target.mention} for this group.")
+    try:
+        await unmute_member(client, message.chat.id, target.id)
+        await message.reply_text(f"✅ Approved and unmuted {target.mention} for this group.")
+    except Exception as exc:
+        await message.reply_text(
+            f"✅ Approved {target.mention}, but unmute failed: {type(exc).__name__}. Use /unmute."
+        )
 
 
 @app.on_message(filters.group & filters.command("unapprove"))
@@ -530,13 +598,7 @@ async def unmute_command(client, message):
     target = await resolve_target(client, message)
     if not target:
         return await message.reply_text("Reply to a user or use /unmute @username.")
-    await client.restrict_chat_member(
-        message.chat.id, target.id,
-        ChatPermissions(can_send_messages=True, can_send_media_messages=True,
-                        can_send_other_messages=True, can_add_web_page_previews=True),
-    )
-    await log_action(message.chat.id, target.id, target.username or str(target.id),
-                     "unmuted by admin", "UNMUTE")
+    await unmute_member(client, message.chat.id, target.id)
     await message.reply_text(f"🔊 {target.mention} has been unmuted.")
 
 
