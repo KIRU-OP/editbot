@@ -19,6 +19,7 @@ async def connect_db():
     await _db.moderation_logs.create_index([("chat_id", 1), ("created_at", -1)])
     await _db.message_snapshots.create_index([("chat_id", 1), ("message_id", 1)], unique=True)
     await _db.edit_history.create_index([("chat_id", 1), ("edited_at", -1)])
+    await _db.sudo_users.create_index("user_id", unique=True)
     return _db
 
 
