@@ -687,7 +687,8 @@ async def sudolist_command(client, message):
     await message.reply_text("👑 OWNERS & SUDO USERS\n" + "\n".join(owners + lines))
 
 
-@app.on_message(filters.private & filters.command(["botstats", "globalstats"]))
+@app.on_message(filters.private & filters.command(["botstats", "globalstats", "stats"]))
+
 @app.on_message(filters.group & filters.command(["botstats", "globalstats"]))
 async def botstats_command(client, message):
     if not await require_owner(message):
