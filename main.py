@@ -1,5 +1,6 @@
 import asyncio
 import re
+import time
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 
@@ -22,6 +23,7 @@ USERNAME_RE = re.compile(r"(?<![\w/])@([A-Za-z][A-Za-z0-9_]{3,})")
 PROFILE_CACHE = {}
 CACHE_LOCK = asyncio.Lock()
 FLOOD_BUCKETS = defaultdict(deque)
+START_TIME = time.monotonic()
 
 
 def message_text(message):
@@ -61,6 +63,33 @@ async def require_admin(message):
 
 async def is_approved(chat_id, user_id):
     return await db().approved_users.find_one({"chat_id": chat_id, "user_id": user_id}) is not None
+
+
+async def is_sudo(user_id):
+    return user_id in OWNER_IDS or await db().sudo_users.find_one({"user_id": user_id}) is not None
+
+
+async def require_owner(message):
+    if not message.from_user or message.from_user.id not in OWNER_IDS:
+        await message.reply_text("⛔ This command is reserved for the bot owner.")
+        return False
+    return True
+
+
+def readable_uptime():
+    seconds = int(time.monotonic() - START_TIME)
+    days, seconds = divmod(seconds, 86400)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+    parts.append(f"{seconds}s")
+    return " ".join(parts)
 
 
 async def is_link_approved(chat_id, link):
@@ -273,13 +302,24 @@ async def edited_message_handler(client, message):
     )
     settings = await group_settings(message.chat.id)
     # Edit deletion is intentionally OFF unless an admin enables it.
-    if settings.get("delete_edited_messages", False) and not await is_admin(client, message.chat.id, user.id):
+    if (settings.get("delete_edited_messages", False)
+            and not await is_admin(client, message.chat.id, user.id)
+            and not await is_sudo(user.id)):
         try:
             await message.delete()
             await log_action(message.chat.id, user.id, user.username or str(user.id),
                              "edited message removed by edit guard", "EDIT-DELETE")
-        except Exception:
-            pass
+            await client.send_message(
+                message.chat.id,
+                f"✏️ {user.mention} edited a message. The edited message was removed by EDITBOT."
+            )
+            await notify_log(
+                client, message.chat.id, user, "edited message removed by edit guard",
+                user.username or str(user.id), action="EDIT-DELETE"
+            )
+        except Exception as exc:
+            await log_action(message.chat.id, user.id, user.username or str(user.id),
+                             "edit deletion failed: " + type(exc).__name__, "EDIT-DELETE-FAILED")
 
 
 @app.on_message(filters.group & filters.command("antipromo"))
@@ -515,6 +555,156 @@ async def stats_command(client, message):
         f"Edited messages tracked: {edits}\n"
         f"Anti-Promo: {'ON' if settings.get('antipromo') else 'OFF'}\n"
         f"Anti-Flood: {'ON' if settings.get('antiflood') else 'OFF'}"
+    )
+
+
+
+
+@app.on_message(filters.private & filters.command("start"))
+@app.on_message(filters.group & filters.command("start"))
+async def start_command(client, message):
+    if message.chat.type == ChatType.PRIVATE:
+        await message.reply_text(
+            "👋 Welcome to EDITBOT!\n\n"
+            "I help group admins manage edited messages, anti-promotion, approvals, "
+            "flood protection and moderation logs.\n\n"
+            "Add me to your group as an admin, grant message deletion/restrict-member "
+            "permissions as needed, then use /help."
+        )
+    else:
+        await message.reply_text(f"EDITBOT is online. Uptime: {readable_uptime()}\nUse /help to see commands.")
+
+
+@app.on_message(filters.private & filters.command("help"))
+@app.on_message(filters.group & filters.command("help"))
+async def help_command(client, message):
+    text = (
+        "🛡️ EDITBOT COMMANDS\n\n"
+        "GROUP ADMIN COMMANDS\n"
+        "/antipromo on|off|status — promotion scanner\n"
+        "/approve @user — approve a member\n"
+        "/unapprove @user — revoke approval\n"
+        "/approved — list approved members\n"
+        "/unmute @user — unmute a member\n"
+        "/scan @user — scan accessible profile/public channel data\n"
+        "/promologs — recent moderation actions\n"
+        "/approve_link <invite> — allow an invite\n"
+        "/unapprove_link <invite> — remove allowed invite\n"
+        "/approved_links — list allowed invites\n"
+        "/antiflood on|off|status — flood protection\n"
+        "/editguard on|off|status — edited-message deletion\n"
+        "/editlogs — recent edit history\n"
+        "/setmute <minutes> — set anti-promo mute duration\n"
+        "/stats — current group statistics\n"
+        "/id — show Telegram IDs\n\n"
+        "OWNER COMMANDS\n"
+        "/addsudo @user — grant sudo access\n"
+        "/delsudo @user — revoke sudo access\n"
+        "/sudolist — list sudo users\n"
+        "/botstats — bot-wide statistics\n"
+        "/status — bot uptime and status"
+    )
+    await message.reply_text(text)
+
+
+@app.on_message(filters.private & filters.command("status"))
+@app.on_message(filters.group & filters.command("status"))
+async def status_command(client, message):
+    await message.reply_text(
+        "🟢 EDITBOT STATUS\n"
+        f"Uptime: {readable_uptime()}\n"
+        f"Mode: Pyrogram + MongoDB\n"
+        f"Chat: {message.chat.id}"
+    )
+
+
+@app.on_message(filters.private & filters.command("id"))
+@app.on_message(filters.group & filters.command("id"))
+async def id_command(client, message):
+    lines = [
+        f"Your ID: {message.from_user.id if message.from_user else 'Unavailable'}",
+        f"Chat ID: {message.chat.id}",
+        f"Message ID: {message.id}",
+    ]
+    if len(message.command) > 1:
+        try:
+            target = await client.get_users(message.command[1])
+            lines.append(f"User ID: {target.id}")
+        except Exception:
+            return await message.reply_text("I couldn't resolve that user. Try a valid @username or numeric ID.")
+    if message.reply_to_message:
+        reply = message.reply_to_message
+        lines.append(f"Replied Message ID: {reply.id}")
+        if reply.from_user:
+            lines.append(f"Replied User ID: {reply.from_user.id}")
+        elif reply.sender_chat:
+            lines.append(f"Replied Sender Chat ID: {reply.sender_chat.id}")
+    await message.reply_text("🆔 TELEGRAM IDs\n" + "\n".join(lines))
+
+
+@app.on_message(filters.private & filters.command("addsudo"))
+@app.on_message(filters.group & filters.command("addsudo"))
+async def addsudo_command(client, message):
+    if not await require_owner(message):
+        return
+    target = await resolve_target(client, message)
+    if not target:
+        return await message.reply_text("Reply to a user or use /addsudo @username.")
+    if target.id in OWNER_IDS:
+        return await message.reply_text("That user is already configured as an owner.")
+    await db().sudo_users.update_one(
+        {"user_id": target.id},
+        {"$set": {"username": target.username, "added_by": message.from_user.id,
+                  "added_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    await message.reply_text(f"✅ {target.mention} has been added as a Sudo user.")
+
+
+@app.on_message(filters.private & filters.command(["delsudo", "rmsudo"]))
+@app.on_message(filters.group & filters.command(["delsudo", "rmsudo"]))
+async def delsudo_command(client, message):
+    if not await require_owner(message):
+        return
+    target = await resolve_target(client, message)
+    if not target:
+        return await message.reply_text("Reply to a user or use /delsudo @username.")
+    result = await db().sudo_users.delete_one({"user_id": target.id})
+    await message.reply_text(
+        f"✅ Sudo access removed from {target.mention}."
+        if result.deleted_count else "That user is not in the Sudo list."
+    )
+
+
+@app.on_message(filters.private & filters.command("sudolist"))
+@app.on_message(filters.group & filters.command("sudolist"))
+async def sudolist_command(client, message):
+    if not await require_owner(message):
+        return
+    rows = await db().sudo_users.find({}).sort("added_at", 1).limit(100).to_list(length=100)
+    lines = [f"• {row['user_id']} — @{row.get('username') or 'no username'}" for row in rows]
+    owners = [f"• {uid} — owner" for uid in sorted(OWNER_IDS)]
+    await message.reply_text("👑 OWNERS & SUDO USERS\n" + "\n".join(owners + lines))
+
+
+@app.on_message(filters.private & filters.command(["botstats", "globalstats"]))
+@app.on_message(filters.group & filters.command(["botstats", "globalstats"]))
+async def botstats_command(client, message):
+    if not await require_owner(message):
+        return
+    groups = await db().groups.count_documents({})
+    users = await db().approved_users.distinct("user_id")
+    actions = await db().moderation_logs.count_documents({})
+    edits = await db().edit_history.count_documents({})
+    sudo_count = await db().sudo_users.count_documents({})
+    await message.reply_text(
+        "📊 EDITBOT GLOBAL STATS\n"
+        f"Configured groups: {groups}\n"
+        f"Approved users: {len(users)}\n"
+        f"Moderation actions: {actions}\n"
+        f"Edited messages tracked: {edits}\n"
+        f"Sudo users: {sudo_count}\n"
+        f"Uptime: {readable_uptime()}"
     )
 
 
