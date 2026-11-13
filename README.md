@@ -17,7 +17,7 @@ EDITBOT is a Pyrogram + MongoDB group moderation bot with anti-promotion scannin
 - Owner-managed persistent Sudo users with /addsudo, /delsudo, and /sudolist.
 - Telegram ID lookup, /start, /help, /status, and owner-only global statistics.
 - Per-group settings, moderation logs, and basic statistics.
-- Optional central moderation log chat via LOG_CHAT_ID.
+- Central activity log chat via LOG_CHAT_ID: bot startup, private /start events, bot added/removed from groups, and moderation events.
 - MongoDB indexes for group settings, approvals, snapshots, and moderation history.
 
 ## Telegram privacy and permission limits
@@ -96,7 +96,9 @@ Send `/help` to EDITBOT in a private chat or in your group to see the full in-bo
 5. Use `/help` whenever you need command syntax and usage examples.
 
 Commands that target a member accept either an `@username` argument or a reply to that member's message. Group moderation commands require group-admin rights. Sudo management and global statistics are owner-only.
-## Environment variables
+## Central activity log group
+
+Set `LOG_CHAT_ID` in `.env` to the numeric ID of a private Telegram log group (for example, `-1001234567890`). Add EDITBOT to that log group so it can post messages. The log reports bot startup, users who press `/start` in private chat, and when EDITBOT itself is added to or removed from a group. It includes the group title, numeric ID, public link when available, and the actor's name/ID. For private groups, Telegram may not expose an invite link, so the log will say it is unavailable. Keep the log group restricted to trusted admins because it may contain private group names and activity.
 
 See .env.example. Keep `.env` private and never commit bot tokens, API credentials, or database credentials.
 
