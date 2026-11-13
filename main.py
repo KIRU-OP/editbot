@@ -4,7 +4,7 @@ from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 
 from pyrogram import Client, filters
-from pyrogram.enums import ChatMemberStatus
+from pyrogram.enums import ChatMemberStatus, ChatType
 from pyrogram.types import ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import (
@@ -84,6 +84,13 @@ async def inspect_profile_and_public_channel(client, user_id, force=False):
         if bio_links:
             findings.append(("member bio contains a Telegram group invite", bio_links[0]))
         handles = extract_public_handles(bio)
+        for handle in sorted(handles)[:3]:
+            try:
+                linked_chat = await client.get_chat(handle)
+                if linked_chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
+                    findings.append((f"member bio links to public group @{handle}", f"https://t.me/{handle}"))
+            except Exception:
+                continue
     except Exception:
         # An inaccessible profile is not evidence of a violation.
         pass
@@ -148,6 +155,19 @@ async def handle_promo(client, message, settings):
             if not await is_link_approved(message.chat.id, link):
                 reasons.append(("unapproved group invite posted in a message", link))
                 break
+        # Resolve public Telegram handles in messages: public groups are promo links,
+        # while channels are not treated as group invites merely because they are linked.
+        if not reasons:
+            for handle in sorted(extract_public_handles(message_text(message)))[:3]:
+                try:
+                    linked_chat = await client.get_chat(handle)
+                    if linked_chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
+                        public_link = f"https://t.me/{handle}"
+                        if not await is_link_approved(message.chat.id, public_link):
+                            reasons.append(("public group link posted in a message", public_link))
+                            break
+                except Exception:
+                    continue
 
     # Run profile/channel scan independently, even when the message itself contains a link.
     if settings.get("scan_bio", True) or settings.get("scan_public_channel_posts", True):
