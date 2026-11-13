@@ -11,9 +11,9 @@ from database import connect_db, db, group_settings, log_action
 
 app = Client("editbot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-INVITE_RE = re.compile(r"(?i)(?:https?://)?(?:www\\.)?(?:t\\.me|telegram\\.me)/(?:\\+|joinchat/)[A-Za-z0-9_-]+")
-PUBLIC_TG_RE = re.compile(r"(?i)(?:https?://)?(?:www\\.)?t\\.me/([A-Za-z][A-Za-z0-9_]{3,})")
-USERNAME_RE = re.compile(r"(?<!\\w)@([A-Za-z][A-Za-z0-9_]{3,})")
+INVITE_RE = re.compile(r"(?i)(?:https?://)?(?:www\.)?(?:t\.me|telegram\.me)/(?:\+|joinchat/)[A-Za-z0-9_-]+")
+PUBLIC_TG_RE = re.compile(r"(?i)(?:https?://)?(?:www\.)?t\.me/([A-Za-z][A-Za-z0-9_]{3,})")
+USERNAME_RE = re.compile(r"(?<!\w)@([A-Za-z][A-Za-z0-9_]{3,})")
 PROFILE_CACHE = {}
 CACHE_LOCK = asyncio.Lock()
 
